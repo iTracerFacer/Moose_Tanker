@@ -1,9 +1,84 @@
 -- ============================================================================
 -- MOOSE TANKER MANAGEMENT SYSTEM
--- Comprehensive tanker lifecycle management with auto-respawn, fuel monitoring,
--- TACAN/frequency announcements, and menu controls
+-- Author: F99th-TracerFacer
+-- GitHub: https://github.com/iTracerFacer/Moose_Tanker
+-- Latest Version: https://github.com/iTracerFacer/Moose_Tanker/blob/main/Moose_Tanker.lua
 -- ============================================================================
-
+--
+-- SYNOPSIS:
+-- This script provides comprehensive aerial refueling tanker management for DCS
+-- World missions using the MOOSE framework. It handles complete tanker lifecycle
+-- from spawn to destruction, including automatic respawning, fuel monitoring,
+-- custom route planning via map markers, and dynamic menu integration.
+--
+-- KEY FEATURES:
+-- • Simple Spawning: Launch tankers at default locations with orbit patterns
+-- • Custom Routes: Place numbered map markers to define custom tanker tracks
+-- • Dynamic Rerouting: Change active tanker routes mid-mission
+-- • Fuel Management: Automatic low fuel warnings and RTB at bingo fuel
+-- • Auto-Respawn: Tankers automatically respawn after destruction
+-- • Emergency Spawns: Fast-respawn option for urgent refueling needs
+-- • TACAN/Radio Info: Automatic announcements of tanker frequencies
+-- • Status Reporting: Real-time fuel and position information
+-- • Menu Integration: F10 radio menu with organized tanker operations
+--
+-- BASIC USAGE:
+-- 1. Add this script to your mission's "MISSION START" trigger
+-- 2. Ensure MOOSE.lua is loaded BEFORE this script
+-- 3. Customize the TANKER_CONFIG section below (optional)
+-- 4. In-game: Press F10 → Tanker Operations → Launch tanker
+-- 5. Tankers spawn with default orbit patterns and refueling services
+--
+-- CUSTOM ROUTE USAGE:
+-- 1. Open F10 map and place numbered markers: SHELL1, SHELL2, SHELL3, etc.
+-- 2. Use marker syntax for altitude/speed: SHELL1:FL220:SP330
+-- 3. F10 → Tanker Operations → Custom Route → Launch tanker
+-- 4. Tanker spawns and flies your waypoint sequence
+-- 5. Optional: Use :RTB marker to send tanker home to nearest base
+--
+-- CONFIGURATION BASICS:
+-- • TANKER_CONFIG: Define tanker types, callsigns, TACAN, radio frequencies
+-- • ROUTE_CONFIG: Customize waypoint limits and marker behavior
+-- • FUEL_CHECK_INTERVAL: How often fuel state is monitored (seconds)
+-- • DEFAULT_SPAWN_COORD: Where tankers spawn for non-custom launches
+--
+-- MARKER SYNTAX REFERENCE:
+-- SHELL1              → Basic waypoint at default altitude/speed
+-- SHELL1:FL180        → Override altitude (FL180 = 18,000 feet)
+-- SHELL2::SP300       → Override speed (300 knots)
+-- SHELL3:FL220:SP330  → Override both altitude and speed
+-- SHELL4:RTB          → Return to nearest friendly airbase and land
+--
+-- SUPPORTED TANKERS:
+-- • KC-135 (boom refueling)
+-- • KC-135 MPRS (boom and drogue refueling)
+-- • Easily expandable to other tanker types (KC-10, S-3, etc.)
+--
+-- STRATEGIC USES:
+-- • Mission Planning: Pre-plan tanker tracks for specific mission phases
+-- • Dynamic Support: Reposition tankers as the battle evolves
+-- • Emergency Response: Spawn emergency tankers with reduced spawn time
+-- • Training Missions: Provide realistic refueling training environments
+-- • Multiplayer Ops: Coordinate tanker positioning for strike packages
+--
+-- REQUIREMENTS:
+-- • DCS World 2.5.6 or later
+-- • MOOSE Framework (latest version recommended)
+-- • Basic understanding of DCS mission editing
+--
+-- NOTES:
+-- • Script uses MOOSE SPAWN, COORDINATE, GROUP, and EVENT frameworks
+-- • Tankers automatically detect damage and return to base if critical
+-- • Fuel monitoring includes 25% warning and 15% bingo (configurable)
+-- • Respawn delay is 180 seconds by default (60 seconds for emergency)
+-- • Custom route markers are automatically deleted after use (configurable)
+-- • Works with MenuManager if available, otherwise creates standalone menu
+--
+-- For detailed documentation, examples, and troubleshooting:
+-- Visit: https://github.com/iTracerFacer/Moose_Tanker
+--
+-- Future integration with CTLD and other logistics scripts is planned!
+--
 -- ============================================================================
 -- USER CONFIGURATION
 -- ============================================================================
