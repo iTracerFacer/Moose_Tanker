@@ -1,84 +1,9 @@
 -- ============================================================================
 -- MOOSE TANKER MANAGEMENT SYSTEM
--- Author: F99th-TracerFacer
--- GitHub: https://github.com/iTracerFacer/Moose_Tanker
--- Latest Version: https://github.com/iTracerFacer/Moose_Tanker/blob/main/Moose_Tanker.lua
+-- Comprehensive tanker lifecycle management with auto-respawn, fuel monitoring,
+-- TACAN/frequency announcements, and menu controls
 -- ============================================================================
---
--- SYNOPSIS:
--- This script provides comprehensive aerial refueling tanker management for DCS
--- World missions using the MOOSE framework. It handles complete tanker lifecycle
--- from spawn to destruction, including automatic respawning, fuel monitoring,
--- custom route planning via map markers, and dynamic menu integration.
---
--- KEY FEATURES:
--- • Simple Spawning: Launch tankers at default locations with orbit patterns
--- • Custom Routes: Place numbered map markers to define custom tanker tracks
--- • Dynamic Rerouting: Change active tanker routes mid-mission
--- • Fuel Management: Automatic low fuel warnings and RTB at bingo fuel
--- • Auto-Respawn: Tankers automatically respawn after destruction
--- • Emergency Spawns: Fast-respawn option for urgent refueling needs
--- • TACAN/Radio Info: Automatic announcements of tanker frequencies
--- • Status Reporting: Real-time fuel and position information
--- • Menu Integration: F10 radio menu with organized tanker operations
---
--- BASIC USAGE:
--- 1. Add this script to your mission's "MISSION START" trigger
--- 2. Ensure MOOSE.lua is loaded BEFORE this script
--- 3. Customize the TANKER_CONFIG section below (optional)
--- 4. In-game: Press F10 → Tanker Operations → Launch tanker
--- 5. Tankers spawn with default orbit patterns and refueling services
---
--- CUSTOM ROUTE USAGE:
--- 1. Open F10 map and place numbered markers: SHELL1, SHELL2, SHELL3, etc.
--- 2. Use marker syntax for altitude/speed: SHELL1:FL220:SP330
--- 3. F10 → Tanker Operations → Custom Route → Launch tanker
--- 4. Tanker spawns and flies your waypoint sequence
--- 5. Optional: Use :RTB marker to send tanker home to nearest base
---
--- CONFIGURATION BASICS:
--- • TANKER_CONFIG: Define tanker types, callsigns, TACAN, radio frequencies
--- • ROUTE_CONFIG: Customize waypoint limits and marker behavior
--- • FUEL_CHECK_INTERVAL: How often fuel state is monitored (seconds)
--- • DEFAULT_SPAWN_COORD: Where tankers spawn for non-custom launches
---
--- MARKER SYNTAX REFERENCE:
--- SHELL1              → Basic waypoint at default altitude/speed
--- SHELL1:FL180        → Override altitude (FL180 = 18,000 feet)
--- SHELL2::SP300       → Override speed (300 knots)
--- SHELL3:FL220:SP330  → Override both altitude and speed
--- SHELL4:RTB          → Return to nearest friendly airbase and land
---
--- SUPPORTED TANKERS:
--- • KC-135 (boom refueling)
--- • KC-135 MPRS (boom and drogue refueling)
--- • Easily expandable to other tanker types (KC-10, S-3, etc.)
---
--- STRATEGIC USES:
--- • Mission Planning: Pre-plan tanker tracks for specific mission phases
--- • Dynamic Support: Reposition tankers as the battle evolves
--- • Emergency Response: Spawn emergency tankers with reduced spawn time
--- • Training Missions: Provide realistic refueling training environments
--- • Multiplayer Ops: Coordinate tanker positioning for strike packages
---
--- REQUIREMENTS:
--- • DCS World 2.5.6 or later
--- • MOOSE Framework (latest version recommended)
--- • Basic understanding of DCS mission editing
---
--- NOTES:
--- • Script uses MOOSE SPAWN, COORDINATE, GROUP, and EVENT frameworks
--- • Tankers automatically detect damage and return to base if critical
--- • Fuel monitoring includes 25% warning and 15% bingo (configurable)
--- • Respawn delay is 180 seconds by default (60 seconds for emergency)
--- • Custom route markers are automatically deleted after use (configurable)
--- • Works with MenuManager if available, otherwise creates standalone menu
---
--- For detailed documentation, examples, and troubleshooting:
--- Visit: https://github.com/iTracerFacer/Moose_Tanker
---
--- Future integration with CTLD and other logistics scripts is planned!
---
+
 -- ============================================================================
 -- USER CONFIGURATION
 -- ============================================================================
@@ -93,7 +18,7 @@ local TANKER_CONFIG = {
     livery = nil,                 -- nil for default, or livery_id string
     callsign = "SHELL",           -- Map marker prefix for custom routes
     tacan = "50X",                -- Set to match ME or nil if none
-    frequency = "251.000",         -- Set to match ME or nil if none
+    frequency = "252.000",         -- Set to match ME or nil if none
     respawnDelay = 180,            -- seconds before auto-respawn after destruction
     emergencyRespawnDelay = 60,    -- Emergency spawn delay
     fuelWarningPercent = 25,       -- Warn when fuel drops below this %
@@ -109,7 +34,7 @@ local TANKER_CONFIG = {
     livery = nil,
     callsign = "ARCO",             -- Map marker prefix for custom routes
     tacan = "51X",
-    frequency = "252.000",
+    frequency = "253.000",
     respawnDelay = 180,
     emergencyRespawnDelay = 60,
     fuelWarningPercent = 25,
@@ -146,6 +71,7 @@ TANKER_STATE = {
   KC135 = {
     active = false,
     group = nil,
+    dcsGroupName = nil,
     fuelWarned = false,
     bingoWarned = false,
     respawnScheduler = nil,
@@ -154,6 +80,7 @@ TANKER_STATE = {
   KC135_MPRS = {
     active = false,
     group = nil,
+    dcsGroupName = nil,
     fuelWarned = false,
     bingoWarned = false,
     respawnScheduler = nil,
@@ -161,13 +88,26 @@ TANKER_STATE = {
   }
 }
 
+local UNIQUE_NAME_COUNTER = 0
+
+local function NextUniqueIndex()
+  UNIQUE_NAME_COUNTER = UNIQUE_NAME_COUNTER + 1
+  return UNIQUE_NAME_COUNTER
+end
+
+local function GenerateGroupName(base, index)
+  return string.format("%s #%03d", base, index)
+end
+
+local function GenerateUnitName(base, index)
+  return string.format("%s-%03d", base, index)
+end
+
 -- ============================================================================
 -- MENU REFERENCES (for enable/disable)
 -- ============================================================================
 
 local MENU_TANKER_ROOT = nil
-local MENU_KC135_LAUNCH = nil
-local MENU_KC135_MPRS_LAUNCH = nil
 
 -- ============================================================================
 -- MESSAGE POOLS FOR VARIETY
@@ -1268,33 +1208,7 @@ end
 
 --- Update menu state based on tanker availability
 local function UpdateTankerMenus()
-  if MENU_KC135_LAUNCH then
-    if TANKER_STATE.KC135.active then
-      MENU_KC135_LAUNCH:Remove()
-      MENU_KC135_LAUNCH = nil
-    elseif not MENU_KC135_LAUNCH then
-      MENU_KC135_LAUNCH = MENU_COALITION_COMMAND:New(
-        coalition.side.BLUE, 
-        "Launch " .. TANKER_CONFIG.KC135.displayName, 
-        MENU_TANKER_ROOT, 
-        SpawnTanker
-      )
-    end
-  end
-  
-  if MENU_KC135_MPRS_LAUNCH then
-    if TANKER_STATE.KC135_MPRS.active then
-      MENU_KC135_MPRS_LAUNCH:Remove()
-      MENU_KC135_MPRS_LAUNCH = nil
-    elseif not MENU_KC135_MPRS_LAUNCH then
-      MENU_KC135_MPRS_LAUNCH = MENU_COALITION_COMMAND:New(
-        coalition.side.BLUE, 
-        "Launch " .. TANKER_CONFIG.KC135_MPRS.displayName, 
-        MENU_TANKER_ROOT, 
-        SpawnTankerMPRS
-      )
-    end
-  end
+  -- Standard spawn menus removed; nothing to manage for now.
 end
 
 --- Announce tanker information to coalition
@@ -1365,27 +1279,6 @@ local function StartFuelMonitor(stateKey, config)
   )
 end
 
---- Schedule auto-respawn after tanker loss
-local function ScheduleRespawn(stateKey, config, spawnFunc)
-  local state = TANKER_STATE[stateKey]
-  
-  -- Cancel existing respawn if any
-  if state.respawnScheduler then
-    state.respawnScheduler:Stop()
-  end
-  
-  local countdown = config.respawnDelay
-  
-  MESSAGE:New(string.format("%s will respawn in %d seconds", 
-    config.displayName, countdown), 10):ToBlue()
-  
-  -- Respawn scheduler
-  state.respawnScheduler = SCHEDULER:New(nil, function()
-    env.info(string.format("[TANKER] Auto-respawning %s", config.displayName))
-    spawnFunc()
-  end, {}, config.respawnDelay)
-end
-
 --- Clean up tanker state
 local function CleanupTankerState(stateKey)
   local state = TANKER_STATE[stateKey]
@@ -1394,6 +1287,7 @@ local function CleanupTankerState(stateKey)
   state.group = nil
   state.fuelWarned = false
   state.bingoWarned = false
+  state.dcsGroupName = nil
   
   if state.fuelMonitor then
     state.fuelMonitor:Stop()
@@ -1511,79 +1405,92 @@ end
 --- @param config table Tanker configuration
 --- @param coord COORDINATE Where to spawn
 --- @param heading number Initial heading in degrees
---- @return GROUP The spawned tanker group
+--- @return GROUP|nil The spawned tanker group wrapper
+--- @return string|nil The actual DCS group name used for the spawn
 local function SpawnTankerFromConfig(config, coord, heading)
-  -- Generate unique group/unit IDs
-  local groupId = math.random(10000, 99999)
-  local unitId = math.random(10000, 99999)
-  
+  -- Generate unique identifiers to prevent registration conflicts
+  local uniqueIndex = NextUniqueIndex()
+  local uniqueGroupName = GenerateGroupName(config.groupName, uniqueIndex)
+  local uniqueUnitName = GenerateUnitName(config.unitName, uniqueIndex)
+
   -- Ensure we have valid altitude (coord.y is altitude in meters MSL)
   local spawnAlt = coord.y
   env.info(string.format("[TANKER] Spawn altitude: %.1f meters (FL%03d)", spawnAlt, spawnAlt * 3.28084 / 100))
-  
-  -- Create group data structure
+
+  -- Create group definition for coalition.addGroup
   local groupData = {
-    ["visible"] = false,
-    ["taskSelected"] = true,
-    ["route"] = {
-      ["points"] = {
-        [1] = {
-          ["alt"] = spawnAlt,
-          ["type"] = "Turning Point",
-          ["action"] = "Turning Point",
-          ["alt_type"] = "BARO",
-          ["speed"] = config.defaultSpeed * 0.514444,
-          ["task"] = {
-            ["id"] = "ComboTask",
-            ["params"] = {
-              ["tasks"] = {
-                [1] = {
-                  ["id"] = "Tanker",
-                  ["params"] = {}
+    visible = false,
+    taskSelected = true,
+    route = {
+      points = {
+        {
+          alt = spawnAlt,
+          type = "Turning Point",
+          action = "Turning Point",
+          alt_type = "BARO",
+          speed = config.defaultSpeed * 0.514444,
+          task = {
+            id = "ComboTask",
+            params = {
+              tasks = {
+                {
+                  id = "Tanker",
+                  params = {}
                 }
               }
             }
           },
-          ["x"] = coord.x,
-          ["y"] = coord.z,
+          x = coord.x,
+          y = coord.z,
         }
       }
     },
-    ["hidden"] = false,
-    ["units"] = {
-      [1] = {
-        ["alt"] = spawnAlt,
-        ["alt_type"] = "BARO",
-        ["livery_id"] = config.livery,
-        ["skill"] = "High",
-        ["speed"] = config.defaultSpeed * 0.514444,
-        ["type"] = config.aircraftType,
-        ["unitId"] = unitId,
-        ["psi"] = -heading,  -- Negative for correct heading
-        ["unitName"] = config.unitName,
-        ["x"] = coord.x,
-        ["y"] = coord.z,
-        ["heading"] = math.rad(heading),
-        ["onboard_num"] = "010",
+    hidden = false,
+    units = {
+      {
+        alt = spawnAlt,
+        alt_type = "BARO",
+        livery_id = config.livery,
+        skill = "High",
+        speed = config.defaultSpeed * 0.514444,
+        type = config.aircraftType,
+        psi = -heading,
+        unitName = uniqueUnitName,
+        x = coord.x,
+        y = coord.z,
+        heading = math.rad(heading),
+        onboard_num = "010",
       },
     },
-    ["groupId"] = groupId,
-    ["y"] = coord.z,
-    ["x"] = coord.x,
-    ["name"] = config.groupName,
-    ["task"] = "Refueling",
+    y = coord.z,
+    x = coord.x,
+    name = uniqueGroupName,
+    task = "Refueling",
   }
-  
-  -- Spawn the group using coalition.addGroup
-  local spawnedGroup = coalition.addGroup(country.id.USA, Group.Category.AIRPLANE, groupData)
-  
-  if spawnedGroup then
-    env.info(string.format("[TANKER] Spawned %s (ID: %d)", config.groupName, groupId))
-    return GROUP:Find(spawnedGroup:getName())
-  else
+
+  local spawnedId = coalition.addGroup(country.id.USA, Group.Category.AIRPLANE, groupData)
+
+  if not spawnedId then
     env.error(string.format("[TANKER] Failed to spawn %s", config.groupName))
     return nil
   end
+
+  env.info(string.format("[TANKER] Spawned %s as %s", config.groupName, uniqueGroupName))
+
+  local mooseGroup = GROUP:FindByName(uniqueGroupName)
+  if not mooseGroup and Group and Group.getByName then
+    local dcsGroup = Group.getByName(uniqueGroupName)
+    if dcsGroup then
+      mooseGroup = GROUP:Find(dcsGroup)
+    end
+  end
+
+  if not mooseGroup then
+    env.warning(string.format("[TANKER] Spawned %s but could not resolve group wrapper", uniqueGroupName))
+    return nil
+  end
+
+  return mooseGroup, uniqueGroupName
 end
 
 --- Ensure default spawns immediately enter a holding pattern so they do not RTB
@@ -1749,7 +1656,7 @@ local function SpawnCustomRouteTanker(callsign, config, stateKey, isEmergency)
   -- Set the spawn coordinate with correct altitude (convert feet to meters)
   local spawnCoord = routePoints[1].coord:SetAltitude(routePoints[1].altitude * 0.3048)
   
-  local spawnedGroup = SpawnTankerFromConfig(
+  local spawnedGroup, spawnedName = SpawnTankerFromConfig(
     config,
     spawnCoord,
     initialHeading
@@ -1868,6 +1775,7 @@ local function SpawnCustomRouteTanker(callsign, config, stateKey, isEmergency)
   state.group = spawnedGroup
   state.fuelWarned = false
   state.bingoWarned = false
+  state.dcsGroupName = spawnedName or (spawnedGroup.GetName and spawnedGroup:GetName()) or config.groupName
   
   -- Announce spawn with details
   AnnounceTankerInfo(config, true)
@@ -1907,6 +1815,7 @@ function BlueTankerEventHandler:OnEventBirth(EventData)
     local state = TANKER_STATE[stateKey]
     state.active = true
     state.group = GROUP:FindByName(groupName)
+    state.dcsGroupName = groupName
     state.fuelWarned = false
     state.bingoWarned = false
     
@@ -1928,23 +1837,20 @@ function BlueTankerEventHandler:OnEventDead(EventData)
     env.info(string.format("[TANKER] Dead event: %s", groupName))
     
     -- Determine which tanker died
-    local stateKey, config, spawnFunc
+    local stateKey, config
     if string.find(groupName, "MPRS") then
       stateKey = "KC135_MPRS"
       config = TANKER_CONFIG.KC135_MPRS
-      spawnFunc = SpawnTankerMPRS
     else
       stateKey = "KC135"
       config = TANKER_CONFIG.KC135
-      spawnFunc = SpawnTanker
     end
     
     MESSAGE:New(GetRandomMessage("DESTROYED", config.displayName), 
       15, "ALERT"):ToBlue()
     
-    -- Clean up and schedule respawn
+    -- Clean up state
     CleanupTankerState(stateKey)
-    ScheduleRespawn(stateKey, config, spawnFunc)
     
     -- Update menus
     UpdateTankerMenus()
@@ -1963,23 +1869,20 @@ function BlueTankerEventHandler:OnEventEngineShutdown(EventData)
     env.info(string.format("[TANKER] Engine shutdown event: %s", groupName))
     
     -- Determine which tanker
-    local stateKey, config, spawnFunc
+    local stateKey, config
     if string.find(groupName, "MPRS") then
       stateKey = "KC135_MPRS"
       config = TANKER_CONFIG.KC135_MPRS
-      spawnFunc = SpawnTankerMPRS
     else
       stateKey = "KC135"
       config = TANKER_CONFIG.KC135
-      spawnFunc = SpawnTanker
     end
     
     MESSAGE:New(string.format("%s has returned to base", config.displayName), 
       10):ToBlue()
     
-    -- Clean up and schedule respawn
+    -- Clean up state
     CleanupTankerState(stateKey)
-    ScheduleRespawn(stateKey, config, spawnFunc)
     
     -- Update menus
     UpdateTankerMenus()
@@ -2002,64 +1905,6 @@ end
 -- ============================================================================
 -- SPAWN OBJECTS AND FUNCTIONS
 -- ============================================================================
-
--- Function to spawn KC-135
-function SpawnTanker()
-  if TANKER_STATE.KC135.active then
-    MESSAGE:New(GetRandomMessage("ALREADY_ACTIVE", TANKER_CONFIG.KC135.displayName), 10):ToBlue()
-    return
-  end
-  
-  env.info("[TANKER] Spawning KC-135")
-  local spawnedGroup = SpawnTankerFromConfig(
-    TANKER_CONFIG.KC135,
-    DEFAULT_SPAWN_COORD,
-    0  -- heading north
-  )
-  
-  if spawnedGroup then
-    ApplyDefaultOrbitRoute(spawnedGroup, DEFAULT_SPAWN_COORD, TANKER_CONFIG.KC135)
-    TANKER_STATE.KC135.active = true
-    TANKER_STATE.KC135.group = spawnedGroup
-    AnnounceTankerInfo(TANKER_CONFIG.KC135, true)
-    
-    -- Start fuel monitoring
-    StartFuelMonitor("KC135", TANKER_CONFIG.KC135)
-    
-    UpdateTankerMenus()
-  else
-    MESSAGE:New(GetRandomMessage("SPAWN_FAILURE", TANKER_CONFIG.KC135.displayName), 10, "ERROR"):ToBlue()
-  end
-end
-
--- Function to spawn KC-135 MPRS
-function SpawnTankerMPRS()
-  if TANKER_STATE.KC135_MPRS.active then
-    MESSAGE:New(GetRandomMessage("ALREADY_ACTIVE", TANKER_CONFIG.KC135_MPRS.displayName), 10):ToBlue()
-    return
-  end
-  
-  env.info("[TANKER] Spawning KC-135 MPRS")
-  local spawnedGroup = SpawnTankerFromConfig(
-    TANKER_CONFIG.KC135_MPRS,
-    DEFAULT_SPAWN_COORD,
-    0  -- heading north
-  )
-  
-  if spawnedGroup then
-    ApplyDefaultOrbitRoute(spawnedGroup, DEFAULT_SPAWN_COORD, TANKER_CONFIG.KC135_MPRS)
-    TANKER_STATE.KC135_MPRS.active = true
-    TANKER_STATE.KC135_MPRS.group = spawnedGroup
-    AnnounceTankerInfo(TANKER_CONFIG.KC135_MPRS, true)
-    
-    -- Start fuel monitoring
-    StartFuelMonitor("KC135_MPRS", TANKER_CONFIG.KC135_MPRS)
-    
-    UpdateTankerMenus()
-  else
-    MESSAGE:New(GetRandomMessage("SPAWN_FAILURE", TANKER_CONFIG.KC135_MPRS.displayName), 10, "ERROR"):ToBlue()
-  end
-end
 
 -- Function to spawn KC-135 with custom route
 function SpawnCustomTanker()
@@ -2460,21 +2305,6 @@ else
   MENU_TANKER_ROOT = MENU_COALITION:New(coalition.side.BLUE, "Tanker Operations")
   env.warning("[TANKER] MenuManager not found - creating root menu (load MenuManager first!)")
 end
-
--- Standard tanker spawns
-MENU_KC135_LAUNCH = MENU_COALITION_COMMAND:New(
-  coalition.side.BLUE, 
-  "Launch " .. TANKER_CONFIG.KC135.displayName, 
-  MENU_TANKER_ROOT, 
-  SpawnTanker
-)
-
-MENU_KC135_MPRS_LAUNCH = MENU_COALITION_COMMAND:New(
-  coalition.side.BLUE, 
-  "Launch " .. TANKER_CONFIG.KC135_MPRS.displayName, 
-  MENU_TANKER_ROOT, 
-  SpawnTankerMPRS
-)
 
 -- Custom route submenu
 local MENU_CUSTOM_ROUTE = MENU_COALITION:New(
