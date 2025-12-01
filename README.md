@@ -1,6 +1,7 @@
 # MOOSE Tanker Management System
 
-**Author:** F99th-TracerFacer  
+**Author:** F99th-TracerFacer
+**Discord:** https://discord.gg/NdZ2JuSU (The Fighting 99th Discord Server where spend most of my time.)
 **Latest Version:** [Moose_Tanker.lua](https://github.com/iTracerFacer/Moose_Tanker/blob/main/Moose_Tanker.lua)
 
 A comprehensive aerial refueling tanker management system for DCS World missions using the MOOSE framework. Provides complete tanker lifecycle management including dynamic spawning, custom route planning, automatic respawning, fuel monitoring, and in-flight rerouting capabilities.
