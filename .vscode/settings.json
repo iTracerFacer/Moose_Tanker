@@ -1,0 +1,10 @@
+{
+    "Lua.diagnostics.globals": [
+        "COORDINATE"
+    ],
+    "Lua.diagnostics.disable": [
+        "undefined-global",
+        "undefined-doc-name",
+        "undefined-field"
+    ]
+}
