@@ -3,7 +3,8 @@
 -- Comprehensive tanker lifecycle management with auto-respawn, fuel monitoring,
 -- TACAN/frequency announcements, and menu controls
 -- ============================================================================
-
+-- **Author**: F99th-TracerFacer
+-- **Discord:** https://discord.gg/NdZ2JuSU (The Fighting 99th Discord Server where I spend most of my time.)
 -- ============================================================================
 -- USER CONFIGURATION
 -- ============================================================================
